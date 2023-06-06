@@ -39,6 +39,7 @@ fnumber ({digit}*\.{digit}+)
 <STRCOND>[^\"]* { yylval.s_val = strdup(yytext);
                 return STRING_LIT;
             }
+"\n"        { ; }
 "str"       { return STR; }
 ">>"        { return RSHIFT; }
 "<<"        { return LSHIFT; }

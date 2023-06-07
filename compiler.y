@@ -23,6 +23,9 @@
     void yyerror(char const *s)
     {
         printf("error:%d: %s\n", yylineno + 1, s);
+        fclose(out);
+        
+        exit(-1);
     }
 
     extern int yylineno;
@@ -308,7 +311,7 @@
 %token ARROW AS IN DOTDOT RSHIFT LSHIFT
 
 %type<i_val> BoolLit
-%type<s_val> Printable Lit ComparisonOperator LogicalTerm1 LogicalTermPrime1 Type VariableTypeDcl FuncCall VariableDcl VariableExpr
+%type<s_val> Printable Lit ComparisonOperator LogicalTerm1 LogicalTermPrime1 Type VariableTypeDcl FuncCall VariableDcl VariableExpr AddrSlicer
 %type<s_val> Factor Term TermPrime LogicalFactor LogicalTerm LogicalTermPrime ExprPrime Expr ArithmeticExpressionPrime ArithmeticExpression Comparison
 
 /* Yacc will start at this nonterminal */
@@ -388,14 +391,16 @@ WhileExpr
                 sprintf(out_buff, "label%d:", lc);
                 lc_stack[++lc_index] = lc++;
                 dump_code_gen(out_buff);
-            } Expr    { 
+            } Expr  { 
                         sprintf(out_buff, "ifeq endLabel%d", lc);
                         lc_stack[++lc_index] = lc++;
                         dump_code_gen(out_buff);
                     } ScopeStart DeclList   {  
                                                 sprintf(out_buff, "goto label%d", lc_stack[lc_index - 1]);
+                                                lc_stack[lc_index - 1] = lc_stack[lc_index];
+                                                lc_index--;
                                                 dump_code_gen(out_buff);
-                                            } ScopeEnd { sprintf(out_buff, "endLabel%d:", lc_stack[lc_index--]); dump_code_gen(out_buff); }
+                                            } ScopeEnd { sprintf(out_buff, "endLabel%d:", lc_stack[lc_index--]); dump_code_gen(out_buff); printf("%d\n",lc_stack[lc_index]); }
 ;
 
 IfExpr 
@@ -584,12 +589,15 @@ Factor
     | FuncCall
     | ID                                                                { Symbol *symbol = lookup_symbol($1); if(symbol) printf("IDENT (name=%s, address=%d)\n", symbol->Name, symbol->Addr); else yyerror(make_yyerr("undefined", $1)); }
         '[' Expr ']'                                                    { Symbol *symbol = lookup_symbol($1); $$ = symbol ? "array" : "undefined"; }
-    | LOOP Scope
-    | ID                                                                { Symbol *symbol = lookup_symbol($1); if(symbol) printf("IDENT (name=%s, address=%d)\n", symbol->Name, symbol->Addr); else yyerror(make_yyerr("undefined", $1)); }
+    | LOOP Scope                                                        { $$ = ""; }
+    | AddrSlicer                                                        { Symbol *symbol = lookup_symbol($1); if(symbol) printf("IDENT (name=%s, address=%d)\n", symbol->Name, symbol->Addr); else yyerror(make_yyerr("undefined", $1)); }
         '[' Expr DOTDOT { puts("DOTDOT"); } Expr ']'                    { Symbol *symbol = lookup_symbol($1); $$ = symbol ? "array" : "undefined"; }
-    | '&' ID                                                            { Symbol *symbol = lookup_symbol($2); if(symbol) printf("IDENT (name=%s, address=%d)\n", symbol->Name, symbol->Addr); else yyerror(make_yyerr("undefined", $2)); }
-        '[' Expr DOTDOT { puts("DOTDOT"); } Expr ']'                    { Symbol *symbol = lookup_symbol($2); $$ = symbol ? "array" : "undefined"; }
     |
+;
+
+AddrSlicer
+    : ID                                                                { $$ = $1; }
+    | '&' ID                                                            { $$ = $2; }
 ;
 
 Lit
@@ -643,8 +651,12 @@ FuncCall
 ;
 
 ParamsPass
-    : Expr ',' ParamsPass
-    | Expr
+    : Expr ParamsPassChain
+    |
+;
+
+ParamsPassChain
+    : ',' ParamsPass
     |
 ;
 

@@ -144,7 +144,15 @@
         dump_code_gen(".end method");
     }
 
+    static int lc = 0;
+
     void printer(char *type, int isNewLine){
+        if(!strcmp(type, "bool")){
+            sprintf(out_buff, "ifeq label%d\nldc \"true\"\ngoto endLabel%d\nlabel%d:\nldc \"false\"\nendLabel%d:", lc, lc, lc, lc);
+            dump_code_gen(out_buff);
+            lc++;
+        }
+
         dump_code_gen("getstatic java/lang/System/out Ljava/io/PrintStream;");
         dump_code_gen("swap");   // LR will trigger literal or expr first so need to swap two command
 
@@ -185,6 +193,45 @@
             case '%':
                 sprintf(out_buff, "%crem", type_simplify(type));
                 break;
+            case 'A':
+                sprintf(out_buff, "iand");
+                break;
+            case 'O':
+                sprintf(out_buff, "ior");
+                break;
+            case '!':
+                sprintf(out_buff, "ifeq label%d\nldc 0\ngoto endLabel%d\nlabel%d:\nldc 1\nendLabel%d:", lc, lc, lc, lc);
+                lc++;
+                break;
+            case '>':
+                sprintf(out_buff, "%s label%d\nldc 0\ngoto endLabel%d\nlabel%d:\nldc 1\nendLabel%d:",!strcmp(type, "f32") ? "fcmpg\nifgt" : "if_icmpgt", lc, lc, lc, lc);
+                lc++;
+                break;
+                
+            case '<':
+                sprintf(out_buff, "%s label%d\nldc 0\ngoto endLabel%d\nlabel%d:\nldc 1\nendLabel%d:",!strcmp(type, "f32") ? "fcmpl\niflt" : "if_icmplt", lc, lc, lc, lc);
+                lc++;
+                break;
+
+            case 'E':
+                sprintf(out_buff, "%s label%d\nldc 0\ngoto endLabel%d\nlabel%d:\nldc 1\nendLabel%d:", !strcmp(type, "f32") ? "fcmpl\nifne" : "if_icmpeq", lc, lc, lc, lc);
+                lc++;
+                break;
+
+            case 'N':
+                sprintf(out_buff, "%s label%d\nldc 1\ngoto endLabel%d\nlabel%d:\nldc 0\nendLabel%d:", !strcmp(type, "f32") ? "fcmpl\nifne" : "if_icmpeq", lc, lc, lc, lc);
+                lc++;
+                break;
+
+            case 'G':
+                sprintf(out_buff, "%s label%d\nldc 0\ngoto endLabel%d\nlabel%d:\nldc 1\nendLabel%d:", !strcmp(type, "f32") ? "fcmpg\nifgt" : "if_icmpge", lc, lc, lc, lc);
+                lc++;
+                break;
+
+            case 'L':
+                sprintf(out_buff, "%s label%d\nldc 0\ngoto endLabel%d\nlabel%d:\nldc 1\nendLabel%d:", !strcmp(type, "f32") ? "fcmpl\nifle" : "if_icmple", lc, lc, lc, lc);
+                lc++;
+                break;
         }
         dump_code_gen(out_buff);
     }
@@ -216,6 +263,16 @@
             sprintf(out_buff, "fload %d", addr);
 
         dump_code_gen(out_buff);
+    }
+
+    char label_comparand(char *s){
+        if(!strcmp(s,"EQL")) return 'E';
+        if(!strcmp(s,"NEQ")) return 'N';
+        if(!strcmp(s,"GTR")) return '>';
+        if(!strcmp(s,"LSS")) return '<';
+        if(!strcmp(s,"GEQ")) return 'G';
+        if(!strcmp(s,"LEQ")) return 'L';
+        return ' ';
     }
 %}
 
@@ -354,7 +411,7 @@ Type
 ;
 
 ExprPrime 
-    : LOR LogicalTerm ExprPrime                                         { printf("LOR\n"); $$ = $2; }
+    : LOR LogicalTerm { operand('O', $2); } ExprPrime                                         { $$ = $2; }
     | 
 ;
 
@@ -363,7 +420,7 @@ LogicalTerm
 ;
 
 LogicalTermPrime
-    : LAND LogicalTerm1 LogicalTermPrime                                { printf("LAND\n"); $$ = $2; }
+    : LAND LogicalTerm1 { operand('A', $2); } LogicalTermPrime                                { $$ = $2; }
     |
 ;
 
@@ -372,7 +429,7 @@ LogicalTerm1
 ;
 
 LogicalTermPrime1
-    : '!' LogicalFactor LogicalTermPrime1                               { printf("NOT\n"); $$ = $2; }
+    : '!' LogicalFactor LogicalTermPrime1                               { operand('!', $2); $$ = $2; }
     |
 ;
 
@@ -390,7 +447,26 @@ Comparison
                                                                                     sprintf(msg, "%s (mismatched types %s and %s)", $2, $1, $3);
                                                                                     yyerror(make_yyerr("invalid operation", msg));
                                                                                 }
-                                                                                printf("%s\n", $2); 
+                                                                                { 
+                                                                                    if (!strcmp($1, "f32") && !strcmp($3, "f32")){
+                                                                                        if(strcmp($1, "f32") && !strcmp($3, "f32")){
+                                                                                            dump_code_gen("swap\ni2f\nswap");
+                                                                                        }
+                                                                                        if(!strcmp($1, "f32") && strcmp($3, "f32")){
+                                                                                            dump_code_gen("i2f");
+                                                                                        }
+                                                                                        operand(label_comparand($2), "f32"); 
+                                                                                    }
+                                                                                    else{
+                                                                                        if(strcmp($1, "f32") && !strcmp($3, "f32")){
+                                                                                            dump_code_gen("f2i");
+                                                                                        }
+                                                                                        if(!strcmp($1, "f32") && strcmp($3, "f32")){
+                                                                                            dump_code_gen("swap\nf2i\nswap");
+                                                                                        }
+                                                                                        operand(label_comparand($2), "bool"); 
+                                                                                    }
+                                                                                } 
                                                                             }
                                                                             $$ = strcmp($2, "") ? "bool" : $1; 
                                                                         }
@@ -430,8 +506,8 @@ ArithmeticExpression
 ;
 
 ArithmeticExpressionPrime
-    : '+' Term { printf("ADD\n");} ArithmeticExpressionPrime            { $$ = $2; operand('+', $2); } 
-    | '-' Term { printf("SUB\n");} ArithmeticExpressionPrime            { $$ = $2; operand('-', $2); }              
+    : '+' Term { operand('+', $2); } ArithmeticExpressionPrime            { $$ = $2; } 
+    | '-' Term { operand('-', $2); } ArithmeticExpressionPrime            { $$ = $2; }              
     |            
 ;
 
@@ -440,9 +516,9 @@ Term
 ;                   
                     
 TermPrime                   
-    : '*' Factor TermPrime                                              { $$ = $2; operand('*', $2); }
-    | '/' Factor TermPrime                                              { $$ = $2; operand('/', $2); }
-    | '%' Factor TermPrime                                              { $$ = $2; operand('%', $2); }
+    : '*' Factor { operand('*', $2); } TermPrime                         { $$ = $2;  }
+    | '/' Factor { operand('/', $2); } TermPrime                         { $$ = $2; }
+    | '%' Factor { operand('%', $2); } TermPrime                         { $$ = $2; }
     |
 ;
 
@@ -501,7 +577,7 @@ Factor
 ;
 
 Lit
-    : BoolLit                                                           { sprintf(out_buff, "ldc %s", $1 ? "TRUE" : "FALSE"); dump_code_gen(out_buff); $$ = "bool"; }
+    : BoolLit                                                           { sprintf(out_buff, "ldc %d", $1); dump_code_gen(out_buff); $$ = "bool"; }
     | INT_LIT                                                           { sprintf(out_buff, "ldc %d", $1); dump_code_gen(out_buff); $$ = "i32"; }
     | '-' INT_LIT                                                       { sprintf(out_buff, "ldc -%d", $2); dump_code_gen(out_buff); $$ = "i32"; }
     | FLOAT_LIT                                                         { sprintf(out_buff, "ldc %f", $1); dump_code_gen(out_buff); $$ = "f32"; }

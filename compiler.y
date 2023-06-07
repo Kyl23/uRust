@@ -145,6 +145,8 @@
     }
 
     static int lc = 0;
+    static int lc_stack[1024];
+    static int lc_index = -1;
 
     void printer(char *type, int isNewLine){
         if(!strcmp(type, "bool")){
@@ -386,8 +388,16 @@ WhileExpr
 ;
 
 IfExpr 
-    : IF Expr Scope
-    | IF Expr Scope ELSE Scope
+    : IF Expr   { 
+                    sprintf(out_buff, "ifeq endLabel%d", lc);
+                    lc_stack[++lc_index] = lc++;
+                    dump_code_gen(out_buff);
+                } Scope { sprintf(out_buff, "endLabel%d:", lc_stack[lc_index--]); dump_code_gen(out_buff); } IfDangling
+;
+
+IfDangling
+    : ELSE Scope 
+    |
 ;
 
 PrintExpr

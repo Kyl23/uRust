@@ -150,6 +150,7 @@
     static int lc = 0;
     static int lc_stack[1024];
     static int lc_index = -1;
+    static int breakLc = -1;
 
     void printer(char *type, int isNewLine){
         if(!strcmp(type, "bool")){
@@ -375,11 +376,14 @@ DeclList
 ;
 
 ForExpr
-    : FOR ID IN Expr                                                    { slient = 1; scope_level++; create_symbol(); insert_symbol($2, "i32", "-", 0); } Scope             
+    : FOR ID IN Expr                                                    { slient = 1; scope_level++; create_symbol(); insert_symbol($2, "i32", "-", 0); } Scope     
 ;
-
 BreakExpr
-    : BREAK Expr ';'              
+    : BREAK Expr ';'                                                    { 
+                                                                            sprintf(out_buff, "goto endLabel%d", lc);
+                                                                            breakLc = lc++;
+                                                                            dump_code_gen(out_buff); 
+                                                                        }
 ;
 
 ReturnExpr
@@ -400,7 +404,7 @@ WhileExpr
                                                 lc_stack[lc_index - 1] = lc_stack[lc_index];
                                                 lc_index--;
                                                 dump_code_gen(out_buff);
-                                            } ScopeEnd { sprintf(out_buff, "endLabel%d:", lc_stack[lc_index--]); dump_code_gen(out_buff); printf("%d\n",lc_stack[lc_index]); }
+                                            } ScopeEnd { sprintf(out_buff, "endLabel%d:", lc_stack[lc_index--]); dump_code_gen(out_buff); }
 ;
 
 IfExpr 
@@ -589,7 +593,16 @@ Factor
     | FuncCall
     | ID                                                                { Symbol *symbol = lookup_symbol($1); if(symbol) printf("IDENT (name=%s, address=%d)\n", symbol->Name, symbol->Addr); else yyerror(make_yyerr("undefined", $1)); }
         '[' Expr ']'                                                    { Symbol *symbol = lookup_symbol($1); $$ = symbol ? "array" : "undefined"; }
-    | LOOP Scope                                                        { $$ = ""; }
+    | LOOP ScopeStart   { 
+                            sprintf(out_buff, "label%d:", lc);
+                            lc_stack[++lc_index] = lc++;
+                            dump_code_gen(out_buff);
+                        } DeclList  {
+                                        sprintf(out_buff, "goto label%d", lc_stack[lc_index - 1]);
+                                        lc_stack[lc_index - 1] = lc_stack[lc_index];
+                                        lc_index--;
+                                        dump_code_gen(out_buff);
+                                    } ScopeEnd                          { sprintf(out_buff, "endLabel%d:", breakLc); dump_code_gen(out_buff); $$ = ""; }
     | AddrSlicer                                                        { Symbol *symbol = lookup_symbol($1); if(symbol) printf("IDENT (name=%s, address=%d)\n", symbol->Name, symbol->Addr); else yyerror(make_yyerr("undefined", $1)); }
         '[' Expr DOTDOT { puts("DOTDOT"); } Expr ']'                    { Symbol *symbol = lookup_symbol($1); $$ = symbol ? "array" : "undefined"; }
     |

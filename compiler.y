@@ -24,7 +24,7 @@
     {
         printf("error:%d: %s\n", yylineno + 1, s);
         fclose(out);
-        
+        system("rm hw3.j");
         exit(-1);
     }
 

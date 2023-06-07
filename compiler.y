@@ -529,14 +529,13 @@ Factor
                                                                             if(symbol) {
                                                                                 printf("IDENT (name=%s, address=%d)\n", symbol->Name, symbol->Addr); 
                                                                                 char *type = symbol->Type;
+                                                                                load(symbol);
                                                                                 if(!strcmp(type, "f32") && !strcmp($3, "i32")) 
-                                                                                    puts("f2i"); 
+                                                                                    dump_code_gen("f2i"); 
                                                                                 else if(!strcmp(type, "i32") && !strcmp($3, "f32")) 
-                                                                                    puts("i2f"); 
-                                                                                else
-                                                                                    printf("Err %s %s\n",type,$3);
-
-                                                                                $$ = symbol->Type;
+                                                                                    dump_code_gen("i2f"); 
+                                                                                
+                                                                                $$ = $3;
                                                                             }
                                                                             else{
                                                                                 yyerror(make_yyerr("undefined", $1)); 
@@ -546,24 +545,20 @@ Factor
     | Lit                                                               { $$ = $1; }
     | Lit AS Type                                                       {  
                                                                             if(!strcmp($1, "f32") && !strcmp($3, "i32")) 
-                                                                                puts("f2i"); 
+                                                                                dump_code_gen("f2i"); 
                                                                             else if(!strcmp($1, "i32") && !strcmp($3, "f32")) 
-                                                                                puts("i2f"); 
-                                                                            else
-                                                                                printf("Err %s %s\n",$1,$3);
-
-                                                                            $$ = $1;
+                                                                                dump_code_gen("i2f"); 
+                                                                            
+                                                                            $$ = $3;
                                                                         }
     | '(' Expr ')'                                                      { $$ = $2; }
     | '(' Expr ')'  AS Type                                             {  
                                                                             if(!strcmp($2, "f32") && !strcmp($5, "i32")) 
-                                                                                puts("f2i"); 
+                                                                                dump_code_gen("f2i"); 
                                                                             else if(!strcmp($2, "i32") && !strcmp($5, "f32")) 
-                                                                                puts("i2f"); 
-                                                                            else
-                                                                                printf("Err %s %s\n",$2,$5);
+                                                                                dump_code_gen("i2f"); 
 
-                                                                            $$ = $2;
+                                                                            $$ = $5;
                                                                         }
     | FuncCall
     | ID                                                                { Symbol *symbol = lookup_symbol($1); if(symbol) printf("IDENT (name=%s, address=%d)\n", symbol->Name, symbol->Addr); else yyerror(make_yyerr("undefined", $1)); }
@@ -595,14 +590,14 @@ VariableDcl
     : LET ID VariableTypeDcl                                            { insert_symbol($2, $3, "-", 0); }  
     | LET MUT ID VariableTypeDcl                                        { insert_symbol($3, $4, "-", 1); }  
 
-    | LET MUT ID ':' INT ';'                                            { insert_symbol($3, "i32", "-1", 1); }  
-    | LET MUT ID ':' FLOAT ';'                                          { insert_symbol($3, "f32", "-1", 1); }
-    | LET MUT ID ':' BOOL ';'                                           { insert_symbol($3, "bool", "-1", 1); }
-    | LET MUT ID ':' '&' STR ';'                                        { insert_symbol($3, "str", "-1", 1); }
+    | LET MUT ID ':' INT ';'                                            { dump_code_gen("ldc -1"); insert_symbol($3, "i32", "-1", 1); }  
+    | LET MUT ID ':' FLOAT ';'                                          { dump_code_gen("ldc -1.0"); insert_symbol($3, "f32", "-1", 1); }
+    | LET MUT ID ':' BOOL ';'                                           { dump_code_gen("ldc 0"); insert_symbol($3, "bool", "-1", 1); }
+    | LET MUT ID ':' '&' STR ';'                                        { dump_code_gen("ldc \"\""); insert_symbol($3, "str", "-1", 1); }
 ;
 
 VariableExpr
-    : ID '=' Expr ';'                                                   { Symbol *symbol = lookup_symbol($1); if(symbol) { store(symbol->Addr, symbol->Type); update_symbol($1); $$ = symbol->Type; } else yyerror(make_yyerr("undefined", $1)); $$ = "undefined"; }
+    : ID '=' Expr ';'                                                   { Symbol *symbol = lookup_symbol($1); if(symbol && symbol->Mut) { store(symbol->Addr, symbol->Type); update_symbol($1); $$ = symbol->Type; } else yyerror(symbol->Mut ? make_yyerr("undefined", $1) : make_yyerr("unmutable", $1)); $$ = "undefined"; }
     | ID ADD_ASSIGN Expr ';'                                            { Symbol *symbol = lookup_symbol($1); if(symbol) { load(symbol); dump_code_gen("swap"); operand('+', symbol->Type); store(symbol->Addr, symbol->Type); update_symbol($1); $$ = symbol->Type; } else yyerror(make_yyerr("undefined", $1)); $$ = "undefined"; }
     | ID SUB_ASSIGN Expr ';'                                            { Symbol *symbol = lookup_symbol($1); if(symbol) { load(symbol); dump_code_gen("swap"); operand('-', symbol->Type); store(symbol->Addr, symbol->Type); update_symbol($1); $$ = symbol->Type; } else yyerror(make_yyerr("undefined", $1)); $$ = "undefined"; }
     | ID MUL_ASSIGN Expr ';'                                            { Symbol *symbol = lookup_symbol($1); if(symbol) { load(symbol); dump_code_gen("swap"); operand('*', symbol->Type); store(symbol->Addr, symbol->Type); update_symbol($1); $$ = symbol->Type; } else yyerror(make_yyerr("undefined", $1)); $$ = "undefined"; }

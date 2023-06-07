@@ -3,8 +3,8 @@
 /* Definition section */
 %{
     #include "compiler_common.h" //Extern variables that communicate with lex
-    #define YYDEBUG 1
-    int yydebug = 1;
+    // #define YYDEBUG 1
+    // int yydebug = 1;
 
     extern int yylineno;
     extern int yylex();
@@ -127,40 +127,95 @@
 
     }
 
-    void dump_prime(char *s){
+    void dump_code_gen(char *s){
         fprintf(out, "%s\n", s);
-    }
-
-    void dump_sub(char *s){
-        fprintf(out, "\t%s\n", s);
     }
     
     void make_out_header(){
-        dump_prime(".class public Main");
-        dump_prime(".super java/lang/Object");
-        dump_prime(".method public static main([Ljava/lang/String;)V");
-        dump_prime(".limit stack 1024");
+        dump_code_gen(".class public Main");
+        dump_code_gen(".super java/lang/Object");
+        dump_code_gen(".method public static main([Ljava/lang/String;)V");
+        dump_code_gen(".limit stack 1024");
+        dump_code_gen(".limit locals 1024");
     }
 
     void make_out_footer(){
-        dump_prime("return");
-        dump_prime(".end method");
+        dump_code_gen("return");
+        dump_code_gen(".end method");
     }
 
     void printer(char *type, int isNewLine){
-        dump_sub("getstatic java/lang/System/out Ljava/io/PrintStream;");
-        dump_sub("swap");   // LR will trigger literal or expr first so need to swap two command
+        dump_code_gen("getstatic java/lang/System/out Ljava/io/PrintStream;");
+        dump_code_gen("swap");   // LR will trigger literal or expr first so need to swap two command
 
         if(!strcmp(type, "str") || !strcmp(type, "bool"))
             sprintf(out_buff, "invokevirtual java/io/PrintStream/%s(Ljava/lang/String;)V", isNewLine ? "println": "print");
         
-        if(!strcmp(type, "float"))
-            sprintf(out_buff, "invokevirtual java/io/PrintStream/%s(Ljava/lang/String;)V", isNewLine ? "println": "print");
+        if(!strcmp(type, "f32"))
+            sprintf(out_buff, "invokevirtual java/io/PrintStream/%s(F)V", isNewLine ? "println": "print");
 
-        if(!strcmp(type, "int"))
-            sprintf(out_buff, "invokevirtual java/io/PrintStream/%s(Ljava/lang/String;)V", isNewLine ? "println": "print");
+        if(!strcmp(type, "i32"))
+            sprintf(out_buff, "invokevirtual java/io/PrintStream/%s(I)V", isNewLine ? "println": "print");
     
-        dump_sub(out_buff);
+        dump_code_gen(out_buff);
+    }
+
+    char type_simplify(char *type){
+        if(!strcmp(type, "i32"))
+            return 'i';
+        if(!strcmp(type, "f32"))
+            return 'f';
+        return ' ';
+    }
+
+    void operand(char op, char *type){
+        switch(op){
+            case '+':
+                sprintf(out_buff, "%cadd", type_simplify(type));
+                break;
+            case '-':
+                sprintf(out_buff, "%csub", type_simplify(type));
+                break;
+            case '*':
+                sprintf(out_buff, "%cmul", type_simplify(type));
+                break;
+            case '/':
+                sprintf(out_buff, "%cdiv", type_simplify(type));
+                break;
+            case '%':
+                sprintf(out_buff, "%crem", type_simplify(type));
+                break;
+        }
+        dump_code_gen(out_buff);
+    }
+
+    void store(char *type, int addr){
+        if(!strcmp(type, "i32") || !strcmp(type, "bool"))
+        sprintf(out_buff, "istore %d", addr);
+
+        if(!strcmp(type, "str"))
+            sprintf(out_buff, "astore %d", addr);
+            
+        if(!strcmp(type, "f32"))
+            sprintf(out_buff, "fstore %d", addr);
+
+        dump_code_gen(out_buff);
+    }
+
+    void load(Symbol *symbol){
+        char *type = symbol->Type;
+        int addr = symbol->Addr;
+
+        if(!strcmp(type, "i32") || !strcmp(type, "bool"))
+            sprintf(out_buff, "iload %d", addr);
+
+        if(!strcmp(type, "str"))
+            sprintf(out_buff, "aload %d", addr);
+            
+        if(!strcmp(type, "f32"))
+            sprintf(out_buff, "fload %d", addr);
+
+        dump_code_gen(out_buff);
     }
 %}
 
@@ -193,8 +248,9 @@
 %token FUNC RETURN BREAK 
 %token ARROW AS IN DOTDOT RSHIFT LSHIFT
 
+%type<i_val> BoolLit
 %type<s_val> Printable Lit ComparisonOperator LogicalTerm1 LogicalTermPrime1 Type VariableTypeDcl FuncCall VariableDcl VariableExpr
-%type<s_val> BoolLit Factor Term TermPrime LogicalFactor LogicalTerm LogicalTermPrime ExprPrime Expr ArithmeticExpressionPrime ArithmeticExpression Comparison
+%type<s_val> Factor Term TermPrime LogicalFactor LogicalTerm LogicalTermPrime ExprPrime Expr ArithmeticExpressionPrime ArithmeticExpression Comparison
 
 /* Yacc will start at this nonterminal */
 %start Program
@@ -374,8 +430,8 @@ ArithmeticExpression
 ;
 
 ArithmeticExpressionPrime
-    : '+' Term { printf("ADD\n");} ArithmeticExpressionPrime            { $$ = $2; } 
-    | '-' Term { printf("SUB\n");} ArithmeticExpressionPrime            { $$ = $2; }              
+    : '+' Term { printf("ADD\n");} ArithmeticExpressionPrime            { $$ = $2; operand('+', $2); } 
+    | '-' Term { printf("SUB\n");} ArithmeticExpressionPrime            { $$ = $2; operand('-', $2); }              
     |            
 ;
 
@@ -384,14 +440,14 @@ Term
 ;                   
                     
 TermPrime                   
-    : '*' Factor TermPrime                                              { printf("MUL\n"); $$ = $2; }
-    | '/' Factor TermPrime                                              { printf("DIV\n"); $$ = $2; }
-    | '%' Factor TermPrime                                              { printf("REM\n"); $$ = $2; }
+    : '*' Factor TermPrime                                              { $$ = $2; operand('*', $2); }
+    | '/' Factor TermPrime                                              { $$ = $2; operand('/', $2); }
+    | '%' Factor TermPrime                                              { $$ = $2; operand('%', $2); }
     |
 ;
 
 Factor
-    : ID                                                                { Symbol *symbol = lookup_symbol($1); if(symbol) {printf("IDENT (name=%s, address=%d)\n", symbol->Name, symbol->Addr);$$ = symbol->Type;} else {yyerror(make_yyerr("undefined", $1)); $$ = "undefined";} }
+    : ID                                                                { Symbol *symbol = lookup_symbol($1); if(symbol) { load(symbol); $$ = symbol->Type; } else {yyerror(make_yyerr("undefined", $1)); $$ = "undefined";} }
     | ID AS Type                                                        {  
                                                                             Symbol *symbol = lookup_symbol($1);
                                                                             if(symbol) {
@@ -445,18 +501,18 @@ Factor
 ;
 
 Lit
-    : BoolLit                                                           { sprintf(out_buff, "ldc %s", $1); dump_sub(out_buff); $$ = "bool"; }
-    | INT_LIT                                                           { sprintf(out_buff, "ldc %d", $1); dump_sub(out_buff); $$ = "i32"; }
-    | '-' INT_LIT                                                       { sprintf(out_buff, "ldc -%d", $2); dump_sub(out_buff); $$ = "i32"; }
-    | FLOAT_LIT                                                         { sprintf(out_buff, "ldc %f", $1); dump_sub(out_buff); $$ = "f32"; }
-    | '-' FLOAT_LIT                                                     { sprintf(out_buff, "ldc -%f", $2); dump_sub(out_buff); $$ = "f32"; }
-    | '"' STRING_LIT '"'                                                { sprintf(out_buff, "ldc \"%s\"", $2); dump_sub(out_buff); $$ = "str";}
-    | '"' '"'                                                           { sprintf(out_buff, "ldc \"\""); dump_sub(out_buff); $$ = "str"; }
+    : BoolLit                                                           { sprintf(out_buff, "ldc %s", $1 ? "TRUE" : "FALSE"); dump_code_gen(out_buff); $$ = "bool"; }
+    | INT_LIT                                                           { sprintf(out_buff, "ldc %d", $1); dump_code_gen(out_buff); $$ = "i32"; }
+    | '-' INT_LIT                                                       { sprintf(out_buff, "ldc -%d", $2); dump_code_gen(out_buff); $$ = "i32"; }
+    | FLOAT_LIT                                                         { sprintf(out_buff, "ldc %f", $1); dump_code_gen(out_buff); $$ = "f32"; }
+    | '-' FLOAT_LIT                                                     { sprintf(out_buff, "ldc -%f", $2); dump_code_gen(out_buff); $$ = "f32"; }
+    | '"' STRING_LIT '"'                                                { sprintf(out_buff, "ldc \"%s\"", $2); dump_code_gen(out_buff); $$ = "str";}
+    | '"' '"'                                                           { sprintf(out_buff, "ldc \"\""); dump_code_gen(out_buff); $$ = "str"; }
 ;                       
 
 BoolLit                     
-    : TRUE                                                              { $$ = "TRUE"; }
-    | FALSE                                                             { $$ = "FALSE"; }
+    : TRUE                                                              { $$ = 1; }
+    | FALSE                                                             { $$ = 0; }
 ;
 
 VariableDcl
@@ -579,6 +635,8 @@ static void insert_symbol(char *name, char *type, char *fun_sig, int mut)
     symbol.Index = form->size;
     symbol.Addr = addr++;
     symbol.Lineno = yylineno + 1;
+
+    store(type, symbol.Addr);
 
     printf("> Insert `%s` (addr: %d) to scope level %d\n", symbol.Name, symbol.Addr, scope_level);
     dynamic_array_append(form, symbol);

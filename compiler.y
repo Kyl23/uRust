@@ -384,7 +384,18 @@ ReturnExpr
 ;
 
 WhileExpr
-    : WHILE Expr Scope
+    : WHILE { 
+                sprintf(out_buff, "label%d:", lc);
+                lc_stack[++lc_index] = lc++;
+                dump_code_gen(out_buff);
+            } Expr    { 
+                        sprintf(out_buff, "ifeq endLabel%d", lc);
+                        lc_stack[++lc_index] = lc++;
+                        dump_code_gen(out_buff);
+                    } ScopeStart DeclList   {  
+                                                sprintf(out_buff, "goto label%d", lc_stack[lc_index - 1]);
+                                                dump_code_gen(out_buff);
+                                            } ScopeEnd { sprintf(out_buff, "endLabel%d:", lc_stack[lc_index--]); dump_code_gen(out_buff); }
 ;
 
 IfExpr 

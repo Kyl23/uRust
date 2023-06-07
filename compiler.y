@@ -236,7 +236,7 @@
         dump_code_gen(out_buff);
     }
 
-    void store(char *type, int addr){
+    void store(int addr, char *type){
         if(!strcmp(type, "i32") || !strcmp(type, "bool"))
         sprintf(out_buff, "istore %d", addr);
 
@@ -602,12 +602,12 @@ VariableDcl
 ;
 
 VariableExpr
-    : ID '=' Expr ';'                                                   { Symbol *symbol = lookup_symbol($1); if(symbol) {puts("ASSIGN"); update_symbol($1); $$ = symbol->Type; } else yyerror(make_yyerr("undefined", $1)); $$ = "undefined"; }
-    | ID ADD_ASSIGN Expr ';'                                            { Symbol *symbol = lookup_symbol($1); if(symbol) {puts("ADD_ASSIGN"); update_symbol($1); $$ = symbol->Type; } else yyerror(make_yyerr("undefined", $1)); $$ = "undefined"; }
-    | ID SUB_ASSIGN Expr ';'                                            { Symbol *symbol = lookup_symbol($1); if(symbol) {puts("SUB_ASSIGN"); update_symbol($1); $$ = symbol->Type; } else yyerror(make_yyerr("undefined", $1)); $$ = "undefined"; }
-    | ID MUL_ASSIGN Expr ';'                                            { Symbol *symbol = lookup_symbol($1); if(symbol) {puts("MUL_ASSIGN"); update_symbol($1); $$ = symbol->Type; } else yyerror(make_yyerr("undefined", $1)); $$ = "undefined"; }
-    | ID DIV_ASSIGN Expr ';'                                            { Symbol *symbol = lookup_symbol($1); if(symbol) {puts("DIV_ASSIGN"); update_symbol($1); $$ = symbol->Type; } else yyerror(make_yyerr("undefined", $1)); $$ = "undefined"; }
-    | ID REM_ASSIGN Expr ';'                                            { Symbol *symbol = lookup_symbol($1); if(symbol) {puts("REM_ASSIGN"); update_symbol($1); $$ = symbol->Type; } else yyerror(make_yyerr("undefined", $1)); $$ = "undefined"; }
+    : ID '=' Expr ';'                                                   { Symbol *symbol = lookup_symbol($1); if(symbol) { store(symbol->Addr, symbol->Type); update_symbol($1); $$ = symbol->Type; } else yyerror(make_yyerr("undefined", $1)); $$ = "undefined"; }
+    | ID ADD_ASSIGN Expr ';'                                            { Symbol *symbol = lookup_symbol($1); if(symbol) { load(symbol); dump_code_gen("swap"); operand('+', symbol->Type); store(symbol->Addr, symbol->Type); update_symbol($1); $$ = symbol->Type; } else yyerror(make_yyerr("undefined", $1)); $$ = "undefined"; }
+    | ID SUB_ASSIGN Expr ';'                                            { Symbol *symbol = lookup_symbol($1); if(symbol) { load(symbol); dump_code_gen("swap"); operand('-', symbol->Type); store(symbol->Addr, symbol->Type); update_symbol($1); $$ = symbol->Type; } else yyerror(make_yyerr("undefined", $1)); $$ = "undefined"; }
+    | ID MUL_ASSIGN Expr ';'                                            { Symbol *symbol = lookup_symbol($1); if(symbol) { load(symbol); dump_code_gen("swap"); operand('*', symbol->Type); store(symbol->Addr, symbol->Type); update_symbol($1); $$ = symbol->Type; } else yyerror(make_yyerr("undefined", $1)); $$ = "undefined"; }
+    | ID DIV_ASSIGN Expr ';'                                            { Symbol *symbol = lookup_symbol($1); if(symbol) { load(symbol); dump_code_gen("swap"); operand('/', symbol->Type); store(symbol->Addr, symbol->Type); update_symbol($1); $$ = symbol->Type; } else yyerror(make_yyerr("undefined", $1)); $$ = "undefined"; }
+    | ID REM_ASSIGN Expr ';'                                            { Symbol *symbol = lookup_symbol($1); if(symbol) { load(symbol); dump_code_gen("swap"); operand('%', symbol->Type); store(symbol->Addr, symbol->Type); update_symbol($1); $$ = symbol->Type; } else yyerror(make_yyerr("undefined", $1)); $$ = "undefined"; }
     | Expr ';'                                                          { $$ = $1; }
 ;
 
@@ -712,7 +712,7 @@ static void insert_symbol(char *name, char *type, char *fun_sig, int mut)
     symbol.Addr = addr++;
     symbol.Lineno = yylineno + 1;
 
-    store(type, symbol.Addr);
+    store(symbol.Addr, type);
 
     printf("> Insert `%s` (addr: %d) to scope level %d\n", symbol.Name, symbol.Addr, scope_level);
     dynamic_array_append(form, symbol);

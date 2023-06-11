@@ -151,6 +151,9 @@
     static int lc_stack[1024];
     static int lc_index = -1;
     static int breakLc = -1;
+    static int array_declaring = 0;
+    static int array_tmp_addr = -1;
+    static int array_tmp_index = 0;
 
     void printer(char *type, int isNewLine){
         if(!strcmp(type, "bool")){
@@ -162,6 +165,9 @@
         dump_code_gen("getstatic java/lang/System/out Ljava/io/PrintStream;");
         dump_code_gen("swap");   // LR will trigger literal or expr first so need to swap two command
 
+        if(!strncmp(type, "array", 5))
+            type = &type[5];
+
         if(!strcmp(type, "str") || !strcmp(type, "bool"))
             sprintf(out_buff, "invokevirtual java/io/PrintStream/%s(Ljava/lang/String;)V", isNewLine ? "println": "print");
         
@@ -170,16 +176,31 @@
 
         if(!strcmp(type, "i32"))
             sprintf(out_buff, "invokevirtual java/io/PrintStream/%s(I)V", isNewLine ? "println": "print");
-    
         dump_code_gen(out_buff);
     }
 
     char type_simplify(char *type){
-        if(!strcmp(type, "i32"))
+        if(!strcmp(type, "i32") || !strcmp(type, "bool"))
             return 'i';
         if(!strcmp(type, "f32"))
             return 'f';
+        if(!strcmp(type, "str"))
+            return 's';
+        if(!strncmp(type, "array", 5)){
+            return type[5];
+        }
+
         return ' ';
+    }
+
+    char *type_completely(char *type){
+        if(!strcmp(type, "i32") || !strcmp(type, "bool"))
+            return "int";
+        if(!strcmp(type, "f32"))
+            return "float";
+        if(!strcmp(type, "str"))
+            return "java/lang/String";
+        return "";
     }
 
     void operand(char op, char *type){
@@ -267,6 +288,9 @@
             
         if(!strcmp(type, "f32"))
             sprintf(out_buff, "fload %d", addr);
+
+        if(!strncmp(type, "array", 5))
+            sprintf(out_buff, "aload %d", addr);
 
         dump_code_gen(out_buff);
     }
@@ -591,8 +615,8 @@ Factor
                                                                             $$ = $5;
                                                                         }
     | FuncCall
-    | ID                                                                { Symbol *symbol = lookup_symbol($1); if(symbol) printf("IDENT (name=%s, address=%d)\n", symbol->Name, symbol->Addr); else yyerror(make_yyerr("undefined", $1)); }
-        '[' Expr ']'                                                    { Symbol *symbol = lookup_symbol($1); $$ = symbol ? "array" : "undefined"; }
+    | ID                                                                { Symbol *symbol = lookup_symbol($1); if(symbol) { load(symbol); } else yyerror(make_yyerr("undefined", $1)); }
+        '[' Expr ']'                                                    { Symbol *symbol = lookup_symbol($1); $$ = symbol ? symbol->Type : "undefined"; sprintf(out_buff,"%caload", type_simplify(symbol->Type)); dump_code_gen(out_buff);}
     | LOOP ScopeStart   { 
                             sprintf(out_buff, "label%d:", lc);
                             lc_stack[++lc_index] = lc++;
@@ -604,7 +628,7 @@ Factor
                                         dump_code_gen(out_buff);
                                     } ScopeEnd                          { sprintf(out_buff, "endLabel%d:", breakLc); dump_code_gen(out_buff); $$ = ""; }
     | AddrSlicer                                                        { Symbol *symbol = lookup_symbol($1); if(symbol) printf("IDENT (name=%s, address=%d)\n", symbol->Name, symbol->Addr); else yyerror(make_yyerr("undefined", $1)); }
-        '[' Expr DOTDOT { puts("DOTDOT"); } Expr ']'                    { Symbol *symbol = lookup_symbol($1); $$ = symbol ? "array" : "undefined"; }
+        '[' Expr DOTDOT { puts("DOTDOT"); } Expr ']'                    { Symbol *symbol = lookup_symbol($1); $$ = symbol ? symbol->Type : "undefined"; }
     |
 ;
 
@@ -614,13 +638,13 @@ AddrSlicer
 ;
 
 Lit
-    : BoolLit                                                           { sprintf(out_buff, "ldc %d", $1); dump_code_gen(out_buff); $$ = "bool"; }
-    | INT_LIT                                                           { sprintf(out_buff, "ldc %d", $1); dump_code_gen(out_buff); $$ = "i32"; }
-    | '-' INT_LIT                                                       { sprintf(out_buff, "ldc -%d", $2); dump_code_gen(out_buff); $$ = "i32"; }
-    | FLOAT_LIT                                                         { sprintf(out_buff, "ldc %f", $1); dump_code_gen(out_buff); $$ = "f32"; }
-    | '-' FLOAT_LIT                                                     { sprintf(out_buff, "ldc -%f", $2); dump_code_gen(out_buff); $$ = "f32"; }
-    | '"' STRING_LIT '"'                                                { sprintf(out_buff, "ldc \"%s\"", $2); dump_code_gen(out_buff); $$ = "str";}
-    | '"' '"'                                                           { sprintf(out_buff, "ldc \"\""); dump_code_gen(out_buff); $$ = "str"; }
+    : BoolLit                                                           { sprintf(out_buff, "ldc %d", $1); dump_code_gen(out_buff); $$ = "bool"; if(array_declaring){ sprintf(out_buff, "aload %d\nldc %d\nldc %d\niastore", array_tmp_addr, array_tmp_index++, $1); dump_code_gen(out_buff); }}
+    | INT_LIT                                                           { sprintf(out_buff, "ldc %d", $1); dump_code_gen(out_buff); $$ = "i32"; if(array_declaring){ sprintf(out_buff, "aload %d\nldc %d\nldc %d\niastore", array_tmp_addr, array_tmp_index++, $1); dump_code_gen(out_buff); }}
+    | '-' INT_LIT                                                       { sprintf(out_buff, "ldc -%d", $2); dump_code_gen(out_buff); $$ = "i32"; if(array_declaring){ sprintf(out_buff, "aload %d\nldc %d\nldc -%d\niastore", array_tmp_addr, array_tmp_index++, $2); dump_code_gen(out_buff); }}
+    | FLOAT_LIT                                                         { sprintf(out_buff, "ldc %f", $1); dump_code_gen(out_buff); $$ = "f32"; if(array_declaring){ sprintf(out_buff, "aload %d\nldc %d\nldc %f\nfastore", array_tmp_addr, array_tmp_index++, $1); dump_code_gen(out_buff); }}
+    | '-' FLOAT_LIT                                                     { sprintf(out_buff, "ldc -%f", $2); dump_code_gen(out_buff); $$ = "f32"; if(array_declaring){ sprintf(out_buff, "aload %d\nldc %d\nldc %f\nfastore", array_tmp_addr, array_tmp_index++, $2); dump_code_gen(out_buff); }}
+    | '"' STRING_LIT '"'                                                { sprintf(out_buff, "ldc \"%s\"", $2); dump_code_gen(out_buff); $$ = "str"; if(array_declaring){ sprintf(out_buff, "aload %d\nldc %d\nldc %s\nsastore", array_tmp_addr, array_tmp_index++, $2); dump_code_gen(out_buff); }}
+    | '"' '"'                                                           { sprintf(out_buff, "ldc \"\""); dump_code_gen(out_buff); $$ = "str"; if(array_declaring){ sprintf(out_buff, "aload %d\nldc %d\nldc %s\nsastore", array_tmp_addr, array_tmp_index++, ""); dump_code_gen(out_buff); }}
 ;                       
 
 BoolLit                     
@@ -669,8 +693,8 @@ ParamsPass
 ;
 
 ParamsPassChain
-    : ',' ParamsPass
-    |
+    : ',' ParamsPass        
+    |                      
 ;
 
 VariableTypeDcl
@@ -678,7 +702,8 @@ VariableTypeDcl
     | ':' '&' STR '=' Expr ';'                                          {  $$ = "str"; }
     
     | '=' Lit ';'                                                       { $$ = $2; }
-    | ':' '[' Type ';' Expr ']' '=' '[' ParamsPass ']' ';'              { $$ = "array"; }
+    | ':' '[' Type ';' Expr { sprintf(out_buff, "%s %s\nastore %d",!strcmp($3, "str")? "anewarray" : "newarray",type_completely($3), addr); dump_code_gen(out_buff); array_declaring = 1; array_tmp_addr = addr; array_tmp_index = 0; } ']' '=' '[' ParamsPass ']' ';'              { sprintf(out_buff, "array%s", $3); $$ = strdup(out_buff); sprintf(out_buff,""); array_declaring = 0; }
+    | ':' '[' Type ';' Expr { sprintf(out_buff, "%s %s\nastore %d",!strcmp($3, "str")? "anewarray" : "newarray",type_completely($3), addr); dump_code_gen(out_buff); } ']'';'                                                                                                         { sprintf(out_buff, "array%s", $3); $$ = strdup(out_buff); sprintf(out_buff,"");}
 ;
 
 Scope
@@ -752,7 +777,7 @@ static void insert_symbol(char *name, char *type, char *fun_sig, int mut)
     symbol.Index = form->size;
     symbol.Addr = addr++;
     symbol.Lineno = yylineno + 1;
-
+    
     store(symbol.Addr, type);
 
     printf("> Insert `%s` (addr: %d) to scope level %d\n", symbol.Name, symbol.Addr, scope_level);

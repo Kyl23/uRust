@@ -151,7 +151,7 @@
     void make_function(char *name, char *func_sig){
         sprintf(out_buff, ".method public static %s%s", name, func_sig);
         dump_code_gen(out_buff);
-        sprintf(out_buff, "");
+        out_buff[0] = '\0';
         dump_code_gen(".limit stack 4096");
         dump_code_gen(".limit locals 4096");
     }
@@ -449,7 +449,7 @@ FunctionDeclStmt
         
         func_init();
         make_out_footer(symbol->Func_sig); 
-        sprintf(out_buff,"");
+        out_buff[0] = '\0';
         params_count = 0;
     }
 
@@ -869,8 +869,8 @@ VariableTypeDcl
     | ':' '&' STR '=' Expr ';'                                          {  $$ = "str"; }
     
     | '=' Lit ';'                                                       { $$ = $2; }
-    | ':' '[' Type ';' Expr { sprintf(out_buff, "%s %s\nastore %d",!strcmp($3, "str")? "anewarray" : "newarray",type_completely($3), addr); dump_code_gen(out_buff); array_declaring = 1; array_tmp_addr = addr; array_tmp_index = 0; } ']' '=' '[' ParamsPass ']' ';'              { sprintf(out_buff, "array%s", $3); $$ = strdup(out_buff); sprintf(out_buff,""); array_declaring = 0; }
-    | ':' '[' Type ';' Expr { sprintf(out_buff, "%s %s\nastore %d",!strcmp($3, "str")? "anewarray" : "newarray",type_completely($3), addr); dump_code_gen(out_buff); } ']'';'                                                                                                         { sprintf(out_buff, "array%s", $3); $$ = strdup(out_buff); sprintf(out_buff,"");}
+    | ':' '[' Type ';' Expr { sprintf(out_buff, "%s %s\nastore %d",!strcmp($3, "str")? "anewarray" : "newarray",type_completely($3), addr); dump_code_gen(out_buff); array_declaring = 1; array_tmp_addr = addr; array_tmp_index = 0; } ']' '=' '[' ParamsPass ']' ';'              { sprintf(out_buff, "array%s", $3); $$ = strdup(out_buff); out_buff[0] = '\0'; array_declaring = 0; }
+    | ':' '[' Type ';' Expr { sprintf(out_buff, "%s %s\nastore %d",!strcmp($3, "str")? "anewarray" : "newarray",type_completely($3), addr); dump_code_gen(out_buff); } ']'';'                                                                                                         { sprintf(out_buff, "array%s", $3); $$ = strdup(out_buff); out_buff[0] = '\0';}
 ;
 
 Scope
@@ -950,8 +950,8 @@ static void insert_symbol(char *name, char *type, char *func_sig, int mut)
 
 static struct symbol *lookup_symbol(char *name) {
     if(!strcmp(name, "")){
-        DynamicArray *form = tables[1];
-        return &form->data[0];
+        DynamicArray *form = tables[0];
+        return &form->data[form->size - 1];
     }
     else
         for(int i = scope_level; i >= 0; i--){

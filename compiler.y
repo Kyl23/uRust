@@ -73,7 +73,6 @@
         Symbol *new_data = (Symbol *)realloc(arr->data, new_capacity * sizeof(Symbol));
         if (new_data == NULL)
         {
-            printf("Failed to resize dynamic array.\n");
             return;
         }
 
@@ -155,6 +154,7 @@
     static int array_tmp_addr = -1;
     static int array_tmp_index = 0;
     static int break_store = 0;
+    static int postpop = 0;
 
     void printer(char *type, int isNewLine){
         if(!strcmp(type, "bool")){
@@ -201,6 +201,9 @@
             return "float";
         if(!strcmp(type, "str"))
             return "java/lang/String";
+        if(!strncmp(type, "array", 5)){
+            return &type[5];
+        }
         return "";
     }
 
@@ -375,7 +378,7 @@ FuncDclTerm
 ;
 
 FuncDcl
-    : FUNC ID                                                           { printf("func: %s\n", $2); insert_symbol($2, "func", "(V)V", -1); slient = 1; scope_level++; create_symbol(); parsing_func = $2;};
+    : FUNC ID                                                           { insert_symbol($2, "func", "(V)V", -1); slient = 1; scope_level++; create_symbol(); parsing_func = $2;};
 
 TypeList
     : TypeList ',' ID ':' Type                                          { insert_symbol($3, $5, "-", 0); append_func_sig($5, 0); }
@@ -386,8 +389,8 @@ TypeList
 DeclList
     : VariableDcl DeclList
     | VariableDcl
-    | VariableExpr DeclList
-    | VariableExpr         
+    | VariableExpr {if(postpop) dump_code_gen("pop"); postpop = 0;} DeclList
+    | VariableExpr         {if(postpop) dump_code_gen("pop"); postpop = 0;}
     | PrintExpr DeclList
     | PrintExpr
     | Scope DeclList
@@ -470,8 +473,8 @@ IfDangling
 ;
 
 PrintExpr
-    : PRINTLN '(' Printable ')' ';'                                     { printf("PRINTLN %s\n", $3); printer($3, 1); }
-    | PRINT '(' Printable ')' ';'                                       { printf("PRINT %s\n", $3); printer($3, 0);};
+    : PRINTLN '(' Printable ')' ';'                                     { printer($3, 1); }
+    | PRINT '(' Printable ')' ';'                                       { printer($3, 0);};
 ;
 
 Printable
@@ -570,7 +573,6 @@ ArithmeticExpression
                                 sprintf(msg, "%s (mismatched types %s and %s)", "LSHIFT", $1, $3);
                                 yyerror(make_yyerr("invalid operation", msg));
                             }
-                            printf("LSHIFT\n");
                         } 
       ArithmeticExpressionPrime      { $$ = $1; }        
     | Term RSHIFT Term  { 
@@ -579,7 +581,6 @@ ArithmeticExpression
                                 sprintf(msg, "%s (mismatched types %s and %s)", "LSHIFT", $1, $3);
                                 yyerror(make_yyerr("invalid operation", msg));
                             }
-                            printf("RSHIFT\n");
                         } 
     ArithmeticExpressionPrime      { $$ = $1; }    
 ;
@@ -606,7 +607,6 @@ Factor
     | ID AS Type                                                        {  
                                                                             Symbol *symbol = lookup_symbol($1);
                                                                             if(symbol) {
-                                                                                printf("IDENT (name=%s, address=%d)\n", symbol->Name, symbol->Addr); 
                                                                                 char *type = symbol->Type;
                                                                                 load(symbol);
                                                                                 if(!strcmp(type, "f32") && !strcmp($3, "i32")) 
@@ -652,14 +652,46 @@ Factor
                                         lc_index--;
                                         dump_code_gen(out_buff);
                                     } ScopeEnd                          { sprintf(out_buff, "endLabel%d:", breakLc); dump_code_gen(out_buff); $$ = ""; }
-    | AddrSlicer                                                        { Symbol *symbol = lookup_symbol($1); if(symbol) printf("IDENT (name=%s, address=%d)\n", symbol->Name, symbol->Addr); else yyerror(make_yyerr("undefined", $1)); }
-        '[' Expr DOTDOT { puts("DOTDOT"); } Expr ']'                    { Symbol *symbol = lookup_symbol($1); $$ = symbol ? symbol->Type : "undefined"; }
-    |
+    | AddrSlicer  '[' { dump_code_gen("dup"); } Expr 
+    { 
+        Symbol *symbol = lookup_symbol($1); 
+        if(symbol) { 
+            if(!strcmp($4, "undefined") && !strcmp(symbol->Type, "str")) 
+                dump_code_gen("ldc 0");
+        } 
+        else 
+            yyerror(make_yyerr("undefined", $1)); 
+        dump_code_gen("dup\nistore 4095");
+    } DOTDOT Expr 
+    {
+        Symbol *symbol = lookup_symbol($1); 
+        if(symbol) { 
+            if(!strcmp(symbol->Type, "str")){
+                if(!strcmp($7, "undefined")) 
+                    dump_code_gen("swap\ninvokevirtual java/lang/String.length()I\ninvokevirtual java/lang/String.substring(II)Ljava/lang/String;"); 
+                else { 
+                    postpop = 1; 
+                    if(!strcmp(symbol->Type,"str")) 
+                    dump_code_gen("invokevirtual java/lang/String.substring(II)Ljava/lang/String;"); }  
+            }
+            else{
+                // here is slice none type str obj haven't done
+                if(!strcmp($7, "undefined")) 
+                    sprintf(out_buff,"swap\narraylength\ndup\nistore 4094\nisub\nldc 1\niadd\nnewarray %s", type_completely(symbol->Type)); 
+                
+                dump_code_gen(out_buff);
+            }
+        } 
+        else 
+            yyerror(make_yyerr("undefined", $1)); 
+    } ']'                    
+        { Symbol *symbol = lookup_symbol($1); $$ = symbol ? symbol->Type : "undefined"; }
+    |                                                                   { $$ = "undefined"; }
 ;
 
 AddrSlicer
-    : ID                                                                { $$ = $1; }
-    | '&' ID                                                            { $$ = $2; }
+    : ID                                                                { Symbol *symbol = lookup_symbol($1); if(symbol) { load(symbol); $$ = $1; array_tmp_addr = symbol->Addr; } else {yyerror(make_yyerr("undefined", $1)); $$ = "undefined";} }
+    | '&' ID                                                            { Symbol *symbol = lookup_symbol($2); if(symbol) { load(symbol); $$ = $2; array_tmp_addr = symbol->Addr; } else {yyerror(make_yyerr("undefined", $2)); $$ = "undefined";} }
 ;
 
 Lit
@@ -678,8 +710,8 @@ BoolLit
 ;
 
 VariableDcl
-    : LET ID VariableTypeDcl                                            { insert_symbol($2, $3, "-", 0); }  
-    | LET MUT ID VariableTypeDcl                                        { insert_symbol($3, $4, "-", 1); }  
+    : LET ID VariableTypeDcl                                            { insert_symbol($2, $3, "-", 0); if(postpop) dump_code_gen("pop"); postpop = 0;}  
+    | LET MUT ID VariableTypeDcl                                        { insert_symbol($3, $4, "-", 1); if(postpop) dump_code_gen("pop"); postpop = 0;}  
 
     | LET MUT ID ':' INT ';'                                            { dump_code_gen("ldc -1"); insert_symbol($3, "i32", "-1", 1); }  
     | LET MUT ID ':' FLOAT ';'                                          { dump_code_gen("ldc -1.0"); insert_symbol($3, "f32", "-1", 1); }
@@ -783,7 +815,6 @@ int main(int argc, char *argv[])
     yyparse();
     dump_symbol();
     make_out_footer();
-    printf("Total lines: %d\n", yylineno);
     fclose(yyin);
 
     fclose(out);
@@ -794,7 +825,6 @@ static void create_symbol()
 {
     DynamicArray *form = malloc(sizeof(DynamicArray *));
     dynamic_array_init(form, 10);
-    printf("> Create symbol table (scope level %d)\n", scope_level);
     tables[scope_level] = form;
 }
 
@@ -814,7 +844,6 @@ static void insert_symbol(char *name, char *type, char *fun_sig, int mut)
         break_store = 1;
     store(symbol.Addr, type);
 
-    printf("> Insert `%s` (addr: %d) to scope level %d\n", symbol.Name, symbol.Addr, scope_level);
     dynamic_array_append(form, symbol);
 }
 
@@ -831,17 +860,7 @@ static struct symbol *lookup_symbol(char *name) {
 
 static void dump_symbol()
 {
-    printf("\n> Dump symbol table (scope level: %d)\n", scope_level);
-    printf("%-10s%-10s%-10s%-10s%-10s%-10s%-10s\n",
-            "Index", "Name", "Mut", "Type", "Addr", "Lineno", "Func_sig");
-
     DynamicArray *form = tables[scope_level];
-
-    for (int i = 0; i < form->size; i++)
-    {
-        Symbol *symbol = &form->data[i];
-        printf("%-10d%-10s%-10d%-10s%-10d%-10d%-10s\n", symbol->Index, symbol->Name, symbol->Mut, symbol->Type, symbol->Addr, symbol->Lineno, symbol->Func_sig);
-    }
 
     dynamic_array_free(form);
 }

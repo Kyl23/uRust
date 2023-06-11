@@ -154,6 +154,7 @@
     static int array_declaring = 0;
     static int array_tmp_addr = -1;
     static int array_tmp_index = 0;
+    static int break_store = 0;
 
     void printer(char *type, int isNewLine){
         if(!strcmp(type, "bool")){
@@ -264,6 +265,11 @@
     }
 
     void store(int addr, char *type){
+        if(break_store) {
+            break_store = 0;
+            return;
+        }
+
         if(!strcmp(type, "i32") || !strcmp(type, "bool"))
         sprintf(out_buff, "istore %d", addr);
 
@@ -400,7 +406,26 @@ DeclList
 ;
 
 ForExpr
-    : FOR ID IN Expr                                                    { slient = 1; scope_level++; create_symbol(); insert_symbol($2, "i32", "-", 0); } Scope     
+    : FOR ID IN Expr                                                    
+    { slient = 1; scope_level++; create_symbol(); sprintf(out_buff, "arraylength\nistore 4095\nldc 0\nistore 4094\nlabel%d:", lc); lc_stack[++lc_index] = lc++; dump_code_gen(out_buff); insert_symbol($2, "i32", "-1", 0); } 
+    ScopeStart {
+        Symbol *symbol = lookup_symbol($2);
+        
+        if(symbol){
+            sprintf(out_buff, "iload 4094\niload 4095\nif_icmpge endLabel%d\naload %d\niload 4094\n%caload\nistore %d", lc_stack[lc_index], array_tmp_addr, type_simplify(symbol->Type), symbol->Addr);
+            dump_code_gen(out_buff);
+        }
+        else{
+            yyerror(make_yyerr("undefined", $2)); 
+        }
+    } DeclList {
+        sprintf(out_buff, "iinc 4094 1\ngoto label%d", lc_stack[lc_index]);
+        dump_code_gen(out_buff); 
+    }
+    ScopeEnd    { 
+        sprintf(out_buff, "endLabel%d:", lc_stack[lc_index--]);
+        dump_code_gen(out_buff); 
+    }
 ;
 BreakExpr
     : BREAK Expr ';'                                                    { 
@@ -577,7 +602,7 @@ TermPrime
 ;
 
 Factor
-    : ID                                                                { Symbol *symbol = lookup_symbol($1); if(symbol) { load(symbol); $$ = symbol->Type; } else {yyerror(make_yyerr("undefined", $1)); $$ = "undefined";} }
+    : ID                                                                { Symbol *symbol = lookup_symbol($1); if(symbol) { load(symbol); $$ = symbol->Type; array_tmp_addr = symbol->Addr; } else {yyerror(make_yyerr("undefined", $1)); $$ = "undefined";} }
     | ID AS Type                                                        {  
                                                                             Symbol *symbol = lookup_symbol($1);
                                                                             if(symbol) {
@@ -785,6 +810,8 @@ static void insert_symbol(char *name, char *type, char *fun_sig, int mut)
     symbol.Addr = addr++;
     symbol.Lineno = yylineno + 1;
     
+    if(!strcmp(fun_sig, "-1"))
+        break_store = 1;
     store(symbol.Addr, type);
 
     printf("> Insert `%s` (addr: %d) to scope level %d\n", symbol.Name, symbol.Addr, scope_level);

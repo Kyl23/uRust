@@ -35,7 +35,7 @@
     /* Symbol table function - you can add new functions if needed. */
     /* parameters and return type can be changed */
     static void create_symbol();
-    static void insert_symbol(char *name, char *type, char *fun_sig, int mut);
+    static void insert_symbol(char *name, char *type, char *func_sig, int mut);
     static struct symbol *lookup_symbol();
     static void update_symbol(char *name);
     static void dump_symbol();
@@ -112,21 +112,31 @@
         }
         scope_level = 0;
     }
-
+    static int params_count = 0;
     void append_func_sig(char *type, int isClosePareness){
         Symbol *symbol = lookup_symbol(parsing_func);
-        if(!strcmp(symbol->Func_sig, ("(V)V"))){
+        
+        if(!strcmp(symbol->Func_sig, ("()V"))){
             symbol->Func_sig = malloc(sizeof(char) * 1024);
             strcpy(symbol->Func_sig, "(");
         }
-        if(isClosePareness)
+        if(isClosePareness){
             strcat(symbol->Func_sig, ")");
+        }
 
-        if(!strcmp(type, "i32")) strcat(symbol->Func_sig, "I");
-        if(!strcmp(type, "str")) strcat(symbol->Func_sig, "S");
-        if(!strcmp(type, "f32")) strcat(symbol->Func_sig, "F");
-        if(!strcmp(type, "bool")) strcat(symbol->Func_sig, "B");
-
+        if(!strcmp(type, "str")) {
+            strcat(symbol->Func_sig, "S");
+        }
+        if(!strcmp(type, "i32")) {
+            strcat(symbol->Func_sig, "I");
+        }
+        if(!strcmp(type, "f32")) {
+            strcat(symbol->Func_sig, "F");
+        }
+        if(!strcmp(type, "bool")) {
+            strcat(symbol->Func_sig, "B");
+        }
+        
     }
 
     void dump_code_gen(char *s){
@@ -136,13 +146,36 @@
     void make_out_header(){
         dump_code_gen(".class public Main");
         dump_code_gen(".super java/lang/Object");
-        dump_code_gen(".method public static main([Ljava/lang/String;)V");
+    }
+
+    void make_function(char *name, char *func_sig){
+        sprintf(out_buff, ".method public static %s%s", name, func_sig);
+        dump_code_gen(out_buff);
+        sprintf(out_buff, "");
         dump_code_gen(".limit stack 4096");
         dump_code_gen(".limit locals 4096");
     }
 
-    void make_out_footer(){
-        dump_code_gen("return");
+    void make_out_footer(char *func_sig){
+        int last_index = strlen(func_sig) - 1;
+        switch(func_sig[last_index])
+        {
+            case 'V' :
+                dump_code_gen("return");
+                break;
+            case 'I' :
+                dump_code_gen("ireturn");
+                break;
+            case 'F' :
+                dump_code_gen("freturn");
+                break;
+            case 'B' :
+                dump_code_gen("ireturn");
+                break;
+            case 'S' :
+                dump_code_gen("sreturn");
+                break;
+        }
         dump_code_gen(".end method");
     }
 
@@ -155,6 +188,8 @@
     static int array_tmp_index = 0;
     static int break_store = 0;
     static int postpop = 0;
+    
+    static char *id_stack[1024];
 
     void printer(char *type, int isNewLine){
         if(!strcmp(type, "bool")){
@@ -346,7 +381,7 @@
 
 %type<i_val> BoolLit
 %type<s_val> Printable Lit ComparisonOperator LogicalTerm1 LogicalTermPrime1 Type VariableTypeDcl FuncCall VariableDcl VariableExpr AddrSlicer
-%type<s_val> Factor Term TermPrime LogicalFactor LogicalTerm LogicalTermPrime ExprPrime Expr ArithmeticExpressionPrime ArithmeticExpression Comparison
+%type<s_val> Factor Term TermPrime LogicalFactor LogicalTerm LogicalTermPrime ExprPrime Expr ArithmeticExpressionPrime ArithmeticExpression Comparison FuncDcl
 
 /* Yacc will start at this nonterminal */
 %start Program
@@ -370,19 +405,66 @@ GlobalStatement
 ;
 
 FunctionDeclStmt
-    : FuncDcl '(' TypeList ')' FuncDclTerm                              { func_init(); }
+    : FuncDcl
+    '(' TypeList ')'  FuncPre 
+    {
+        Symbol *symbol = lookup_symbol($1);
+        char *func_sig = symbol->Func_sig;
+        int last_index = strlen(func_sig) - 1;
+        if(func_sig[last_index] == 'B'){
+            char *tmp = strdup(func_sig);
+            tmp[last_index] = 'I';
+            symbol->Func_sig = tmp;
+        }
 
-FuncDclTerm
-    : Scope
-    | ARROW Type Scope                                                  { append_func_sig($2, 1); }
+        if(!strcmp($1, "main"))
+            make_function($1, "([Ljava/lang/String;)V");
+        else
+            make_function($1, symbol->Func_sig);    
+        char target = '(';
+        char *result = strchr(symbol->Func_sig, target);
+        result++;
+        for(int i = params_count - 1; i >= 0 ; i--){
+            switch(result[i]){
+                case 'V' :
+                    break;
+                case 'I' :
+                    insert_symbol(id_stack[i], "i32", "-1", 0);
+                    break;
+                case 'F' :
+                    insert_symbol(id_stack[i], "f32", "-1", 0);
+                    break;
+                case 'B' :
+                    insert_symbol(id_stack[i], "i32", "-1", 0);
+                    break;
+                case 'S' :
+                    insert_symbol(id_stack[i], "str", "-1", 0);
+                    break;
+            }
+        }
+    }
+    Scope
+    { 
+        Symbol *symbol = lookup_symbol($1);
+        
+        func_init();
+        make_out_footer(symbol->Func_sig); 
+        sprintf(out_buff,"");
+        params_count = 0;
+    }
+
+
+FuncPre
+    : ARROW Type                    { append_func_sig($2, 1); }
+    |
 ;
 
 FuncDcl
-    : FUNC ID                                                           { insert_symbol($2, "func", "(V)V", -1); slient = 1; scope_level++; create_symbol(); parsing_func = $2;};
+    : FUNC ID                                                           { insert_symbol($2, "func", "()V", -1); slient = 1; scope_level++; create_symbol(); parsing_func = $2; $$=$2; }
 
 TypeList
-    : TypeList ',' ID ':' Type                                          { insert_symbol($3, $5, "-", 0); append_func_sig($5, 0); }
-    | ID ':' Type                                                       { insert_symbol($1, $3, "-", 0); append_func_sig($3, 0); }              
+    : TypeList ',' ID ':' Type                                          {  append_func_sig($5, 0); id_stack[params_count++] = $3;}
+    | ID ':' Type                                                       {  append_func_sig($3, 0); id_stack[params_count++] = $1;}              
     |
 ;
 
@@ -405,7 +487,8 @@ DeclList
     | BreakExpr
     | ForExpr DeclList
     | ForExpr                  
-    | Expr                                                              { puts("breturn"); }
+    | Expr                                                              
+    
 ;
 
 ForExpr
@@ -439,7 +522,28 @@ BreakExpr
 ;
 
 ReturnExpr
-    : RETURN Expr ';'                                                   { puts("breturn"); }
+    : RETURN Expr ';'                                                   
+    { 
+        Symbol *symbol = lookup_symbol(""); 
+        char *func_sig = symbol->Func_sig;
+        int last_index = strlen(func_sig) - 1;
+        
+        switch(func_sig[last_index])
+        {
+            case 'I' : 
+                dump_code_gen("ireturn"); 
+                break;
+            case 'F' : 
+                dump_code_gen("freturn"); 
+                break;
+            case 'S' : 
+                dump_code_gen("sreturn"); 
+                break;
+            case 'V' : 
+                dump_code_gen("return"); 
+                break;
+        }
+    }
 ;
 
 WhileExpr
@@ -647,11 +751,9 @@ Factor
                             lc_stack[++lc_index] = lc++;
                             dump_code_gen(out_buff);
                         } DeclList  {
-                                        sprintf(out_buff, "goto label%d", lc_stack[lc_index - 1]);
-                                        lc_stack[lc_index - 1] = lc_stack[lc_index];
-                                        lc_index--;
+                                        sprintf(out_buff, "goto label%d", lc_stack[lc_index]);
                                         dump_code_gen(out_buff);
-                                    } ScopeEnd                          { sprintf(out_buff, "endLabel%d:", breakLc); dump_code_gen(out_buff); $$ = ""; }
+                                    } ScopeEnd                          { sprintf(out_buff, "endLabel%d:", breakLc); lc_index--;dump_code_gen(out_buff); $$ = ""; }
     | AddrSlicer  '[' { dump_code_gen("dup"); } Expr 
     { 
         Symbol *symbol = lookup_symbol($1); 
@@ -740,8 +842,9 @@ FuncCall
     : ID '(' ParamsPass ')'                                             { 
                                                                             if(lookup_symbol($1)){
                                                                                 Symbol *symbol = lookup_symbol($1);
-                                                                                char *fun_sig = symbol->Func_sig;
-                                                                                printf("call: %s%s\n", $1, fun_sig);
+                                                                                char *func_sig = symbol->Func_sig;
+                                                                                sprintf(out_buff, "invokestatic Main/%s%s\n", $1, func_sig);
+                                                                                dump_code_gen(out_buff);
                                                                                 $$ = symbol->Type;
                                                                             }
                                                                             else{
@@ -814,7 +917,6 @@ int main(int argc, char *argv[])
     make_out_header();
     yyparse();
     dump_symbol();
-    make_out_footer();
     fclose(yyin);
 
     fclose(out);
@@ -828,19 +930,18 @@ static void create_symbol()
     tables[scope_level] = form;
 }
 
-static void insert_symbol(char *name, char *type, char *fun_sig, int mut)
+static void insert_symbol(char *name, char *type, char *func_sig, int mut)
 {
     DynamicArray *form = tables[scope_level];
     Symbol symbol;
-    symbol.Func_sig = fun_sig;
+    symbol.Func_sig = func_sig;
     symbol.Name = name;
     symbol.Mut = mut;
     symbol.Type = type;
     symbol.Index = form->size;
     symbol.Addr = addr++;
     symbol.Lineno = yylineno + 1;
-    
-    if(!strcmp(fun_sig, "-1"))
+    if(!strcmp(func_sig, "-1"))
         break_store = 1;
     store(symbol.Addr, type);
 
@@ -848,13 +949,18 @@ static void insert_symbol(char *name, char *type, char *fun_sig, int mut)
 }
 
 static struct symbol *lookup_symbol(char *name) {
-    for(int i = scope_level; i >= 0; i--){
-        DynamicArray *form = tables[i];
-
-        for(int j = 0; j < form->size; j++)
-            if(!strcmp(form->data[j].Name, name))
-                return &form->data[j];
+    if(!strcmp(name, "")){
+        DynamicArray *form = tables[1];
+        return &form->data[0];
     }
+    else
+        for(int i = scope_level; i >= 0; i--){
+            DynamicArray *form = tables[i];
+
+            for(int j = 0; j < form->size; j++)
+                if(!strcmp(form->data[j].Name, name))
+                    return &form->data[j];
+        }
     return NULL;
 }
 
